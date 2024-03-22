@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ondbyte/cb/ogo"
+	"github.com/ondbyte/ogo"
 )
 
 func BenchmarkJsonUnamrshal(b *testing.B) {
@@ -29,6 +29,25 @@ func BenchmarkJsonUnamrshal(b *testing.B) {
 			b.Fatal(err)
 		}
 		err2 = json.Unmarshal(bs, s)
+		if err2 != nil {
+			b.Fatal(err2)
+		}
+	}
+}
+func BenchmarkJsonUnamrshalWithStrData(b *testing.B) {
+	b.ReportAllocs()
+	var err2 error
+	for i := 0; i < b.N; i++ {
+		type Struct struct {
+			Name string
+			Age  int64
+		}
+		m := `{
+			"Name":"Yadu",
+			"Age": 64
+		}`
+		s := &Struct{}
+		err2 = json.Unmarshal([]byte(m), s)
 		if err2 != nil {
 			b.Fatal(err2)
 		}

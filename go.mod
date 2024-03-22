@@ -1,4 +1,4 @@
-module github.com/ondbyte/cb
+module github.com/ondbyte/ogo
 
 go 1.22.0
 

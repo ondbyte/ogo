@@ -3,7 +3,7 @@ package ogo_test
 import (
 	"testing"
 
-	"github.com/ondbyte/cb/ogo"
+	"github.com/ondbyte/ogo"
 )
 
 func TestPathParams(t *testing.T) {
