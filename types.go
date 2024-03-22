@@ -2,6 +2,7 @@ package ogo
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -12,7 +13,8 @@ var i Int64PathParam
 
 var int64PathParam = strings.Split(fmt.Sprintf("%T", i), ".")[1]
 
-func ToInt64PathParam(v string) (Int64PathParam, error) {
+func ToInt64PathParam(v string) (*reflect.Value, error) {
+	strconv
 	return 0, nil
 }
 
