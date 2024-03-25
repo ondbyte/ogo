@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/ondbyte/ogo"
 )
 
@@ -82,13 +82,36 @@ type TestBody struct {
 	Name string
 }
 
+var mux = ogo.NewOgoMux(http.DefaultServeMux)
+
+var maxReq = 10000
+
+func doreq() {
+	var wg sync.WaitGroup
+	for i := range maxReq {
+		wg.Add(1)
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:8080/users/%v/orders/2?QueryId=3&FormId=4", i), strings.NewReader(`{"Name":"Yadu2"}`))
+		if err != nil {
+			panic(err)
+		}
+		req.Header.Set("HeaderId", "5")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(res)
+		wg.Done()
+	}
+	wg.Wait()
+}
+
 /*
-BenchmarkOgo-8   	       1	1005883529 ns/op	  417264 B/op	     684 allocs/op
-BenchmarkOgo-8   	       1	1005120390 ns/op	  417208 B/op	     690 allocs/op
+1	6054114890 ns/op	158732632 B/op	 2133714 allocs/op
 */
 
-var mux = ogo.NewOgoMux(http.DefaultServeMux)
 func BenchmarkOgo(t *testing.B) {
+	var wg sync.WaitGroup
+	wg.Add(maxReq)
 	t.ReportAllocs()
 	mux.Handle(
 		"GET /users/{UserId}/orders/{OrderId}/",
@@ -100,35 +123,30 @@ func BenchmarkOgo(t *testing.B) {
 			FormId   *ogo.FormField[int64]
 			Body     *ogo.Body[TestBody]
 		}) {
-			fmt.Println(req.UserId.Val, req.OrderId.Val, req.Body.Val)
+			fmt.Println(req)
+			wg.Done()
 		})
 	go func() {
 		http.ListenAndServe(":8080", http.DefaultServeMux)
 	}()
 	time.Sleep(time.Second)
-	req, err := http.NewRequest("GET", "http://localhost:8080/users/1/orders/2/1?QueryId=3&FormId=4", strings.NewReader(`{"Name":"Yadu2"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("HeaderId", "5")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(res)
+	go func() {
+		doreq()
+	}()
+	wg.Wait()
 }
 
 /*
-BenchmarkNormalRest-8   	       1	1001962037 ns/op	  370288 B/op	     496 allocs/op
-BenchmarkNormalRest-8   	       1	1004867556 ns/op	  370696 B/op	     499 allocs/op
+1	3699736187 ns/op	85722296 B/op	 1141446 allocs/op
 */
 func BenchmarkNormalRest(t *testing.B) {
 	t.ReportAllocs()
-	e := gin.New()
-	e.Handle(
-		"GET",
-		"/users/{UserId}/orders/{OrderId}/",
-		func(ctx *gin.Context) {
+	var wg sync.WaitGroup
+	wg.Add(maxReq)
+	http.DefaultServeMux.HandleFunc(
+		"GET /users/{UserId}/orders/{OrderId}",
+		func(w http.ResponseWriter, r *http.Request) {
+			defer wg.Done()
 			toInt := func(v string) int64 {
 				i, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
@@ -136,13 +154,13 @@ func BenchmarkNormalRest(t *testing.B) {
 				}
 				return i
 			}
-			UserId := toInt(ctx.Param("UserId"))
-			OrderId := toInt(ctx.Param("OrderId"))
-			HeaderId := toInt(ctx.GetHeader("GeaderId"))
-			QueryId := toInt(ctx.Query("QueryId"))
-			FormId := toInt(ctx.Request.FormValue("FormId"))
+			UserId := toInt(r.PathValue("UserId"))
+			OrderId := toInt(r.PathValue("OrderId"))
+			HeaderId := toInt(r.Header.Get("HeaderId"))
+			QueryId := toInt(r.URL.Query().Get("QueryId"))
+			FormId := toInt(r.FormValue("FormId"))
 
-			rs, err := io.ReadAll(ctx.Request.Body)
+			rs, err := io.ReadAll(r.Body)
 			if err != nil {
 				panic(err)
 			}
@@ -158,14 +176,8 @@ func BenchmarkNormalRest(t *testing.B) {
 		http.ListenAndServe(":8080", http.DefaultServeMux)
 	}()
 	time.Sleep(time.Second)
-	req, err := http.NewRequest("GET", "http://localhost:8080/users/1/orders/2/1?QueryId=3&FormId=4", strings.NewReader(`{"Name":"Yadu2"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("HeaderId", "5")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(res)
+	go func() {
+		doreq()
+	}()
+	wg.Wait()
 }

@@ -31,7 +31,7 @@ func NewErr(format string, a ...any) error {
 	}
 }
 
-func (s *Mux) Handle(path string, handlerFunc I) {
+func (s *Mux) Handle(path string, handlerFunc any) {
 	var err error
 	logger := NewHandlerLogger(path)
 	pathParams := PathParams(path)
@@ -84,10 +84,10 @@ example: '%v %v[int],'`, k, k, k, getTypeName(reflect.TypeOf(&PathParam[any]{}))
 			var err error
 			if ptrFields[i] {
 				field.Set(reflect.New(structFields[i].Type.Elem()))
-				err = setter(r, &field)
+				err = setter(r, field.Interface())
 			} else {
 				addr := field.Addr()
-				err = setter(r, &addr)
+				err = setter(r, addr.Interface())
 			}
 			if err != nil {
 				return nil, fmt.Errorf("unable to set field '%v' of arg struct %v due to err: %v", field, firstArg, err)
@@ -103,11 +103,4 @@ example: '%v %v[int],'`, k, k, k, getTypeName(reflect.TypeOf(&PathParam[any]{}))
 		}
 		rHandlerFn.Call([]reflect.Value{*arg})
 	})
-}
-
-type I interface {
-}
-
-func H(a I) {
-	H(struct{ a string }{})
 }
