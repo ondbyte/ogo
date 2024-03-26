@@ -1,27 +1,11 @@
 package ogo
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
-	"strconv"
 	"strings"
 )
-
-type Demo struct {
-	Name string
-	Age  uint
-}
-
-type Param[T any] struct {
-	Val T
-}
-
-func (pp *Param[T]) set(a any) (b bool) {
-	pp.Val, b = a.(T)
-	return
-}
 
 type Mux struct {
 	mux *http.ServeMux
@@ -47,45 +31,37 @@ func NewErr(format string, a ...any) error {
 	}
 }
 
-func (s *Mux) Handle(path string, handlerFunc any) {
-	defer func() {
-		err := recover()
-		if err2, ok := err.(*Err); ok {
-			panic(fmt.Sprintf("OGO: Handle: %v\n%v", path, err2.Error()))
-		} else if err != nil {
-			panic(err)
-		}
-	}()
+func (s *Mux) Handle(path string, handlerFunc I) {
+	var err error
+	logger := NewHandlerLogger(path)
 	pathParams := PathParams(path)
-	handlerVal := reflect.ValueOf(handlerFunc)
 	handler := reflect.TypeOf(handlerFunc)
 	if handler.NumIn() != 1 {
-		panic(NewErr("handler should have exactly one struct argument"))
+		logger.logAndPanic("handler should have exactly one struct argument")
 	}
 	firstArg := handler.In(0).Elem()
 	if firstArg.Kind() != reflect.Struct {
-		panic(NewErr("first argument type of handler should be a pointer struct"))
+		logger.logAndPanic("first argument type of handler should be a pointer struct")
 	}
-	jsonArg := &strings.Builder{}
-	jsonArg.WriteRune('{')
-	jsonPlaceHolders := map[string]StrValueExtractor{}
 	fields := firstArg.NumField()
+	ptrFields := make([]bool, fields)
+	structFields := make([]*reflect.StructField, fields)
+	fieldSetters := make([]ReflValueExtractor, fields)
 	for j := range fields {
 		field := firstArg.Field(j)
-		//val := r.PathValue(field.Name)
-		strExtr, err := GetStrValueExtractor(field.Name, field.Type)
+		if !field.IsExported() {
+			logger.logAndPanic(
+				"all fields of the handler argument struct needs to be exported, ie must start with a capital letter change '%v' to something like '%v'",
+				field.Name,
+				strings.ToTitle(field.Name),
+			)
+		}
+		structFields[j] = &field
+		fieldSetters[j], err = GetReflValueExtractor(field.Name, field.Type)
 		if err != nil {
-			panic(NewErr(err.Error()))
+			logger.logAndPanic(err.Error())
 		}
-		jsonArg.WriteString(strconv.Quote(field.Name))
-		jsonArg.WriteRune(':')
-		placeHolder := "$" + field.Name
-		jsonArg.WriteString(placeHolder)
-		if j < fields-1 {
-			jsonArg.WriteRune(',')
-		}
-		jsonPlaceHolders[placeHolder] = strExtr
-
+		ptrFields[j] = field.Type.Kind() == reflect.Pointer
 		// mark all path params as consumed one by one
 		if pathParams[field.Name] == 1 {
 			pathParams[field.Name]++
@@ -94,37 +70,44 @@ func (s *Mux) Handle(path string, handlerFunc any) {
 	//verify whether all path params has been consumed
 	for k, v := range pathParams {
 		if v != 2 {
-			panic(NewErr(`path param '%v' isn't consumed,
+			logger.logAndPanic(`path param '%v' isn't consumed
 make sure you add a field with name '%v' with any PathParam type to your argument struct
-example: '%v %v,'`, k, k, k, int64PathParam,
-			))
+example: '%v %v[int],'`, k, k, k, getTypeName(reflect.TypeOf(&PathParam[any]{})),
+			)
 		}
 	}
-	jsonArg.WriteRune('}')
 	reqToArg := func(r *http.Request) (*reflect.Value, error) {
-		newHandlerArg := reflect.New(firstArg)
-		jsonArg := jsonArg.String()
-		for k, v := range jsonPlaceHolders {
-			val, err := v(r)
-			if err != nil {
-				return nil, fmt.Errorf("err while constructing struct argument of type '%v' for handler path '%v', err: %v", firstArg, path, err)
+		newHandlerArgStruct := reflect.New(firstArg)
+		structValue := newHandlerArgStruct.Elem()
+		for i, setter := range fieldSetters {
+			field := structValue.Field(i)
+			var err error
+			if ptrFields[i] {
+				field.Set(reflect.New(structFields[i].Type.Elem()))
+				err = setter(r, &field)
+			} else {
+				addr := field.Addr()
+				err = setter(r, &addr)
 			}
-			jsonArg = strings.Replace(jsonArg, k, val, 1)
+			if err != nil {
+				return nil, fmt.Errorf("unable to set field '%v' of arg struct %v due to err: %v", field, firstArg, err)
+			}
 		}
-		err := json.Unmarshal([]byte(jsonArg), newHandlerArg.Interface())
-		if err != nil {
-			return nil, fmt.Errorf(`err while constructing struct argument of type '%v' for handler path '%v'
-error while unmarshalling json '%v'
-err: %v`, firstArg, path, jsonArg, err)
-		}
-		return &newHandlerArg, nil
+		return &newHandlerArgStruct, nil
 	}
-
+	rHandlerFn := reflect.ValueOf(handlerFunc)
 	s.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		arg, err := reqToArg(r)
 		if err != nil {
-			fmt.Println(err, arg)
+			logger.log(err.Error())
 		}
-		handlerVal.Call([]reflect.Value{*arg})
+		rHandlerFn.Call([]reflect.Value{*arg})
 	})
+}
+
+type I interface {
+}
+
+func H(a I) {
+	H(struct{ a string }{})
 }

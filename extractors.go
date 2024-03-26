@@ -1,12 +1,10 @@
 package ogo
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"reflect"
-	"strconv"
 	"strings"
 )
 
@@ -21,141 +19,96 @@ const (
 type ValueExtractor func(r *http.Request) (interface{}, error)
 type StrValueExtractor func(r *http.Request) (string, error)
 
-func GetValueExtractor(paramName string, paramType reflect.Type) (b ValueExtractor, err error) {
-	switch paramType.String() {
-	case "body", "Body":
-		{
-			b = func(r *http.Request) (interface{}, error) {
-				bs, err := io.ReadAll(r.Body)
-				if err != nil {
-					return nil, fmt.Errorf("err while reading body for param name '%v' and type '%v', err: %v", paramName, paramType, err)
-				}
-				n := reflect.New(paramType).Interface()
-				err = json.Unmarshal(bs, n)
-				if err != nil {
-					return nil, fmt.Errorf("error while unmarshalling the body to pram name '%v' and type '%v', err: %v", paramName, paramType, err)
-				}
-				return n, nil
-			}
-			return
-		}
-	case int64PathParam:
-		b = func(r *http.Request) (interface{}, error) {
-			v := r.PathValue(paramName)
-			return strconv.ParseInt(v, 10, 64)
-		}
-		return
-	default:
-		return nil, fmt.Errorf("type %v isn't supported for param name %v", paramType, paramName)
-	}
-}
-
-func GetStrValueExtractor(paramName string, paramType reflect.Type) (b StrValueExtractor, err error) {
-	isPtr := paramType.Kind() == reflect.Pointer
-	pt := strings.Split(paramType.String(), ".")[1]
-	switch pt {
-	case "body", "Body":
-		{
-			b = func(r *http.Request) (string, error) {
-				bs, err := io.ReadAll(r.Body)
-				if err != nil {
-					return "", fmt.Errorf("err while reading body for param name '%v' and type '%v', err: %v", paramName, paramType, err)
-				}
-				if len(bs) == 0 {
-					return "null", nil
-				}
-				return (string(bs)), nil
-			}
-			return
-		}
-	case int64PathParam:
-		if isPtr {
-			panic(NewErr(fmt.Sprintf("type of '%v' cannot be '%v' ie a pointer, because a path parameter will always be present", paramName, paramType)))
-		}
-		b = func(r *http.Request) (string, error) {
-			v := r.PathValue(paramName)
-			return v, nil
-		}
-		return
-	case float64PathParam:
-		if isPtr {
-			panic(NewErr(fmt.Sprintf("type of '%v' cannot be '%v' ie a pointer, because a path parameter will always be present", paramName, paramType)))
-		}
-		b = func(r *http.Request) (string, error) {
-			v := r.PathValue(paramName)
-			return v, nil
-		}
-		return
-	case boolPathParam:
-		if isPtr {
-			panic(NewErr(fmt.Sprintf("type of '%v' cannot be '%v' ie a pointer, because a path parameter will always be present", paramName, paramType)))
-		}
-		b = func(r *http.Request) (string, error) {
-			v := r.PathValue(paramName)
-			return v, nil
-		}
-		return
-	default:
-		return nil, fmt.Errorf("type %v isn't supported for param name %v", paramType, paramName)
-	}
-}
-
-type ReflValueExtractor func(r *http.Request) (*reflect.Value, error)
+type ReflValueExtractor func(r *http.Request, v *reflect.Value) error
 
 func GetReflValueExtractor(paramName string, paramType reflect.Type) (b ReflValueExtractor, err error) {
 	isPtr := paramType.Kind() == reflect.Pointer
-	pt := strings.Split(paramType.String(), ".")[1]
-	switch pt {
-	case "body", "Body":
+	isRequired := !isPtr
+	paramTypeName, tName := getPkgAndTypeAndTName(paramType)
+	if paramType.PkgPath() != ourPkgName {
+		return nil, fmt.Errorf("you should use only '%v' provided types in the handler argument struct but you have used %v", ourPkgName, paramType)
+	}
+	if strings.HasPrefix(tName, "*") {
+		return nil, fmt.Errorf("you can only use non pointer type for generic type but you have used '%v'", tName)
+	}
+	switch paramTypeName {
+	case "":
 		{
-			b = func(r *http.Request) (*reflect.Value, error) {
+
+		}
+	case getTypeName(reflect.TypeOf(&Body[any]{})): //match body
+		{
+			b = func(r *http.Request, nw *reflect.Value) error {
 				bs, err := io.ReadAll(r.Body)
 				if err != nil {
-					return nil, fmt.Errorf("err while reading body for param name '%v' and type '%v', err: %v", paramName, paramType, err)
+					return NewErr("err while io.ReadAll for body for param name '%v' and type '%v', err: %v", paramName, paramType, err)
 				}
 				if len(bs) == 0 {
-					return nil, nil
+
+					return nil
 				}
-				nw := reflect.New(paramType)
-				err = json.Unmarshal(bs, nw.Interface())
-				if err != nil {
-					return nil, fmt.Errorf("unable to unmarshal to your '%v' field of type '%v' due to err: %v", paramName, paramType, err)
-				}
-				return &nw, nil
+				var nwI interface{} = nw.Interface()
+				um := nwI.(BodyUnmarshaller)
+				return um.Unmarshal(bs, um)
 			}
 			return
 		}
-	case int64PathParam:
-		if isPtr {
-			panic(NewErr(fmt.Sprintf("type of '%v' cannot be '%v' ie a pointer, because a path parameter will always be present", paramName, paramType)))
-		}
-		b = func(r *http.Request) (*reflect.Value, error) {
-			v := r.PathValue(paramName)
-			if v==""{
-				return nil,fmt.Errorf("")
+	case getTypeName(reflect.TypeOf(&PathParam[any]{})): //match param
+		{
+			b = func(r *http.Request, nw *reflect.Value) error {
+				v := r.PathValue(paramName)
+				if v == "" {
+					return fmt.Errorf("path param '%v' is required in request", paramName)
+				}
+				return setParam(nw.Interface(), v)
 			}
-			return v, nil
+			return
 		}
-		return
-	case float64PathParam:
-		if isPtr {
-			panic(NewErr(fmt.Sprintf("type of '%v' cannot be '%v' ie a pointer, because a path parameter will always be present", paramName, paramType)))
+	case getTypeName(reflect.TypeOf(&QueryParam[any]{})): //match param
+		{
+			b = func(r *http.Request, nw *reflect.Value) error {
+				q := r.URL.Query()
+				v := q.Get(paramName)
+				if v == "" && isRequired {
+					return fmt.Errorf("query param '%v' is required in request", paramName)
+				}
+				return setParam(nw.Interface(), v)
+			}
+			return
 		}
-		b = func(r *http.Request) (string, error) {
-			v := r.PathValue(paramName)
-			return v, nil
+	case getTypeName(reflect.TypeOf(&Header[any]{})): //match param
+		{
+			b = func(r *http.Request, nw *reflect.Value) error {
+				v := r.Header.Get(paramName)
+				if v == "" && isRequired {
+					return fmt.Errorf("header '%v' is required in request", paramName)
+				}
+				return setParam(nw.Interface(), v)
+			}
+			return
 		}
-		return
-	case boolPathParam:
-		if isPtr {
-			panic(NewErr(fmt.Sprintf("type of '%v' cannot be '%v' ie a pointer, because a path parameter will always be present", paramName, paramType)))
+	case getTypeName(reflect.TypeOf(&FormField[any]{})): //match param
+		{
+			b = func(r *http.Request, nw *reflect.Value) error {
+				v := r.FormValue(paramName)
+				if v == "" && isRequired {
+					return fmt.Errorf("form field '%v' is required in request", paramName)
+				}
+				return setParam(nw.Interface(), v)
+			}
+			return
 		}
-		b = func(r *http.Request) (string, error) {
-			v := r.PathValue(paramName)
-			return v, nil
+	case getTypeName(reflect.TypeOf(&PostFormField[any]{})): //match param
+		{
+			b = func(r *http.Request, nw *reflect.Value) error {
+				v := r.PostFormValue(paramName)
+				if v == "" && isRequired {
+					return fmt.Errorf("post form field '%v' is required in request", paramName)
+				}
+				return setParam(nw.Interface(), v)
+			}
+			return
 		}
-		return
-	default:
-		return nil, fmt.Errorf("type %v isn't supported for param name %v", paramType, paramName)
 	}
+	return nil, fmt.Errorf("type %v isn't supported for param name %v", paramType, paramName)
 }
