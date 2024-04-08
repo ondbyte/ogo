@@ -17,10 +17,10 @@ type StatusCode int
 type ErrorFormatter func(ReqErrs) (string, StatusCode)
 
 type Ogo struct {
-	setups []func()
-	Ogo    bool
-	Hmux   *http.ServeMux
-	paths  *openapi3.Paths
+	info  *Info
+	Ogo   bool
+	Hmux  *http.ServeMux
+	paths *openapi3.Paths
 }
 
 // ServeHTTP implements http.Handler.
@@ -31,12 +31,14 @@ func (m *Ogo) Run(addr string) error {
 	return http.ListenAndServe(addr, m.Hmux)
 }
 
-func New() *Ogo {
+func New(s OgoSettings) *Ogo {
+	i := &Info{}
+	s(i)
 	return &Ogo{
-		setups: []func(){},
-		Ogo:    true,
-		paths:  openapi3.NewPaths(),
-		Hmux:   http.NewServeMux(),
+		info:  i,
+		Ogo:   true,
+		paths: openapi3.NewPaths(),
+		Hmux:  http.NewServeMux(),
 	}
 }
 
@@ -47,16 +49,18 @@ var (
 )
 
 type RequestValidator[ValidatedData any, RespBody any] struct {
-	root                 *RequestValidator[ValidatedData, RespBody]
-	w                    http.ResponseWriter
-	r                    *http.Request
-	isBasic              bool
-	path                 string
-	params               map[string]*Param
-	query                url.Values
-	ogo                  bool
-	operation            *openapi3.Operation
-	validationErrHandler validationErrHandler[RespBody]
+	root                  *RequestValidator[ValidatedData, RespBody]
+	w                     http.ResponseWriter
+	r                     *http.Request
+	reqBody               *RequestBody //details about the incoming body
+	method                string
+	isRespBodyIsBasicType bool // is the response body is a basic type
+	path                  string
+	params                map[string]*Param
+	query                 url.Values
+	ogo                   bool
+	operation             *openapi3.Operation
+	validationErrHandler  validationErrHandler[RespBody]
 }
 
 type ValErr struct {
@@ -107,10 +111,6 @@ func (v *Validator[reqData, respData]) OnSuccess(d func() (status int, response 
 	}
 } */
 
-func (v *RequestValidator[reqData, respData]) Body(ptr any, s ParamSettings) {
-	v.param("header", name, ptr, s)
-}
-
 func (v *RequestValidator[reqData, respData]) HeaderParam(name string, ptr any, s ParamSettings) {
 	v.param("header", name, ptr, s)
 }
@@ -135,7 +135,7 @@ func (v *RequestValidator[reqData, respBody]) write(r *Response[respBody]) {
 	for _, h := range r.Headers {
 		v.w.Header().Set(h.Key, h.Val)
 	}
-	if v.root.isBasic {
+	if v.root.isRespBodyIsBasicType {
 		v.w.Write([]byte(fmt.Sprintf("%v", r.Body)))
 		return
 	}
@@ -292,12 +292,12 @@ func (ctx *RespContext[reqData, respData]) Write(response respData) {
 }
 func (m *Ogo) serveSwaggerUi(addr string) {
 	t := &openapi3.T{
-		Info:    &openapi3.Info{},
+		Info:    m.info.asOpenApi3Info(),
 		OpenAPI: "3.0.2",
 	}
 	t.Servers = append(t.Servers, &openapi3.Server{
 		URL:         "http://localhost:8080",
-		Description: "jwcnhkbc nb chcbbrkhh bcrbkhbc",
+		Description: "xyz",
 	})
 	t.Paths = m.paths
 	b, err := json.Marshal(t)
@@ -350,12 +350,13 @@ func SetupHandler[ValidatedData any, respBody any](
 		pi.SetOperation(method, op)
 	}
 	root := &RequestValidator[ValidatedData, respBody]{
-		isBasic:              isBasic,
-		ogo:                  true,
-		operation:            op,
-		params:               map[string]*Param{},
-		path:                 path,
-		validationErrHandler: validationErrHandler,
+		method:                method,
+		isRespBodyIsBasicType: isBasic,
+		ogo:                   true,
+		operation:             op,
+		params:                map[string]*Param{},
+		path:                  path,
+		validationErrHandler:  validationErrHandler,
 	}
 	validator(root, new(ValidatedData))
 	mux.Hmux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {

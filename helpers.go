@@ -27,7 +27,7 @@ func isValidRespBodyType(t reflect.Type) (err error, isBasic bool) {
 	if t.Kind() != reflect.Struct {
 		return fmt.Errorf("'%v' is not valid type for response body", t), false
 	}
-	for i := range t.NumField() {
+	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if !f.IsExported() {
 			return fmt.Errorf("all fields in response body type '%v' should be exported", t.Name()), false

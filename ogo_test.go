@@ -4,43 +4,85 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ondbyte/ogo/ogo"
+	"github.com/ondbyte/ogo"
 )
 
 func TestOgo(t *testing.T) {
-	o := ogo.New()
+	o := ogo.New(
+		func(info *ogo.Info) {
+			info.Title("Swagger Petstore")
+			info.Description("This is a sample server Petstore server. You can find out more about Swagger at http://swagger.io or on irc.freenode.net, #swagger. For this sample, you can use the api key special-key to test the authorization filters.")
+			info.TermsOfService("https://smartbear.com/terms-of-use/")
+			info.Contact(
+				&ogo.Contact{
+					Name:  "Yadunandan",
+					Url:   "http://yadunandan.xyz",
+					Email: "iamyadunandan@gmail.com",
+				},
+			)
+			info.License(
+				&ogo.License{
+					Name: "Apache 2.0",
+					Url:  "https://www.apache.org/licenses/LICENSE-2.0.html",
+				},
+			)
+			info.Version("0.0.1")
+		},
+	)
+	type Body struct {
+		Name string `json:"name"`
+	}
 	type ValidatedData struct {
-		UserId  string
-		Cookie1 string
+		PathId   string
+		HeaderId string
+		QueryId  string
+		CookieId string
+		Body     Body
 	}
 	type ResponseBody struct {
 		Msg string `json:"msg"`
 	}
 	ogo.SetupHandler[ValidatedData, ResponseBody](
 		o,
-		"GET",
-		"/users/me",
+		"POST",
+		"/users/{pathId}",
 		func(v *ogo.RequestValidator[ValidatedData, ResponseBody], reqData *ValidatedData) {
 			v.Description(
 				func() string {
 					return "this endpoint returns the user details, please pass the 'userId' path param"
 				})
-			v.QueryParam(
-				"userId", &reqData.UserId,
+			v.PathParam(
+				"pathId", &reqData.PathId,
 				func(param *ogo.Param) {
 					param.Description("id of the user you are fetching")
-					param.Required(http.StatusTeapot, "userId query param is required")
+					param.Required(http.StatusTeapot, "userId path param is required")
 					param.Deprecated(true)
 				},
 			)
-			v.CookieParam(
-				"cookie1", &reqData.Cookie1,
+			v.HeaderParam(
+				"headerId", &reqData.HeaderId,
 				func(param *ogo.Param) {
-					param.Description("cookie1 will be test cookie")
-					param.Required(http.StatusTeapot, "cookie1 cookie param is required, please pass it in you cookie")
+					param.Description("id of the user you are fetching")
+					param.Required(http.StatusTeapot, "headerId path query is required")
+					param.Deprecated(true)
 				},
 			)
-			
+			v.QueryParam(
+				"queryId", &reqData.QueryId,
+				func(param *ogo.Param) {
+					param.Description("id of the user you are fetching")
+					param.Required(http.StatusTeapot, "queryId path query is required")
+					param.Deprecated(true)
+				},
+			)
+
+			v.Body(
+				&reqData.Body,
+				func(body *ogo.RequestBody) {
+					body.MediaType(ogo.Json)
+					body.Description("this is body's description, you can pass it as a json as we have set media type as json")
+				},
+			)
 		},
 		func(validatedStatus int, validatedErr string) (resp *ogo.Response[ResponseBody]) {
 			if validatedErr != "" {

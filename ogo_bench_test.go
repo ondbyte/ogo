@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ondbyte/ogo/ogo"
+	"github.com/ondbyte/ogo"
 )
 
 type ReqData struct {
@@ -81,7 +81,7 @@ func TestB(t *testing.T) {
 /*
  */
 func TestA(t *testing.T) {
-	o := ogo.New()
+	o := ogo.New(nil)
 	var wg sync.WaitGroup
 	wg.Add(maxReq)
 	allocs := 0
@@ -139,7 +139,7 @@ var maxReq = 10000
 
 func doreq() {
 	var wg sync.WaitGroup
-	for i := range maxReq {
+	for i := 0; i < maxReq; i++ {
 		wg.Add(1)
 		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:8080/users/me?token=%v", i), strings.NewReader(`{"Name":"Yadu2"}`))
 		if err != nil {
