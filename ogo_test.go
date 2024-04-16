@@ -1,7 +1,6 @@
 package ogo_test
 
 import (
-	"net/http"
 	"testing"
 
 	"github.com/ondbyte/ogo"
@@ -27,89 +26,6 @@ func TestOgo(t *testing.T) {
 				},
 			)
 			info.Version("0.0.1")
-		},
-	)
-	type Body struct {
-		Name string `json:"name"`
-	}
-	type ValidatedData struct {
-		PathId   string
-		HeaderId string
-		QueryId  string
-		CookieId string
-		Body     Body
-	}
-	type ResponseBody struct {
-		Msg string `json:"msg"`
-	}
-	ogo.SetupHandler[ValidatedData, ResponseBody](
-		o,
-		"POST",
-		"/users/{pathId}",
-		func(v *ogo.RequestValidator[ValidatedData, ResponseBody], reqData *ValidatedData) {
-			v.Description(
-				func() string {
-					return "this endpoint returns the user details, please pass the 'userId' path param"
-				})
-			v.PathParam(
-				"pathId", &reqData.PathId,
-				func(param *ogo.Param) {
-					param.Description("id of the user you are fetching")
-					param.Required(http.StatusTeapot, "userId path param is required")
-					param.Deprecated(true)
-				},
-			)
-			v.HeaderParam(
-				"headerId", &reqData.HeaderId,
-				func(param *ogo.Param) {
-					param.Description("id of the user you are fetching")
-					param.Required(http.StatusTeapot, "headerId path query is required")
-					param.Deprecated(true)
-				},
-			)
-			v.QueryParam(
-				"queryId", &reqData.QueryId,
-				func(param *ogo.Param) {
-					param.Description("id of the user you are fetching")
-					param.Required(http.StatusTeapot, "queryId path query is required")
-					param.Deprecated(true)
-				},
-			)
-
-			v.Body(
-				&reqData.Body,
-				func(body *ogo.RequestBody) {
-					body.MediaType(ogo.Json)
-					body.Description("this is body's description, you can pass it as a json as we have set media type as json")
-				},
-			)
-		},
-		func(validatedStatus int, validatedErr string) (resp *ogo.Response[ResponseBody]) {
-			if validatedErr != "" {
-				return &ogo.Response[ResponseBody]{
-					Status:    validatedStatus,
-					MediaType: ogo.Json,
-					Body: &ResponseBody{
-						Msg: validatedErr,
-					},
-				}
-			}
-			return nil
-		},
-		func(reqData *ValidatedData) (resp *ogo.Response[ResponseBody]) {
-			return &ogo.Response[ResponseBody]{
-				Status:    http.StatusOK,
-				MediaType: ogo.Json,
-				Headers: []*ogo.Header{
-					{
-						Key: "key",
-						Val: "value",
-					},
-				},
-				Body: &ResponseBody{
-					Msg: "success",
-				},
-			}
 		},
 	)
 

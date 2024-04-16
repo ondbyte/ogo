@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "mysql"
+    queries: "db/pets/query.sql"
+    schema: "db/pets/schema.sql"
+    gen:
+      go:
+        package: "pets"
+        out: "db/pets"
+        emit_json_tags: true
+        emit_result_struct_pointers: true
+        json_tags_case_style: snake
