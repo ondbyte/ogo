@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3gen"
 	"github.com/ondbyte/swagui"
 )
 
@@ -75,12 +76,22 @@ func (rerrs ReqErrs) AddErr(r *ValErr) {
 		rerrs = append(rerrs, r)
 	}
 }
+
+// set the description of the endpoint
 func (v *RequestValidator[reqData, respData]) Description(d func() string) {
 	if v.ogo {
 		v.operation.Description = d()
 	}
 }
 
+// sets the summary of the the endpoint
+func (v *RequestValidator[reqData, respData]) Summary(d func() string) {
+	if v.ogo {
+		v.operation.Summary = d()
+	}
+}
+
+// mark this endpoint as deprecated
 func (v *RequestValidator[reqData, respData]) Depricated(d func() bool) {
 	if v.ogo {
 		v.operation.Deprecated = d()
@@ -127,6 +138,14 @@ func (v *RequestValidator[reqData, respData]) PathParam(name string, ptr any, s 
 	v.param("path", name, ptr, s)
 }
 
+// this can be used to set responses that are unknown while validating,
+// for examples the responses that arise from your internal handling of the request data
+func (v *RequestValidator[reqData, respData]) PossibleResponse(fn func() (descr string, response *Response[respData])) {
+	if v.ogo {
+		v.possibleResponse(fn())
+	}
+}
+
 func (v *RequestValidator[reqData, respBody]) write(r *Response[respBody]) {
 	defer func() {
 		v.w = nil
@@ -141,9 +160,15 @@ func (v *RequestValidator[reqData, respBody]) write(r *Response[respBody]) {
 	}
 	switch r.MediaType {
 	case Json, "":
-		bs, err := json.Marshal(r.Body)
-		if err != nil {
-			panic(err)
+		var bs []byte
+		if r.Body != nil {
+			data, err := json.Marshal(r.Body)
+			if err != nil {
+				panic(err)
+			}
+			bs = data
+		} else if r.RawBody != nil {
+			bs = r.RawBody
 		}
 		v.w.Write(bs)
 		return
@@ -184,11 +209,14 @@ func (v *RequestValidator[reqData, respBody]) possibleResponse(
 			},
 		}
 	}
-	var a interface{} = response.Body
-	if a != nil {
+	ref, err := openapi3gen.NewSchemaRefForValue(response.Body, openapi3.Schemas{})
+	if err != nil {
+		panic(err)
+	}
+	if response.MediaType != "" && response.Body != nil {
 		r.Content = openapi3.Content{
 			string(response.MediaType): &openapi3.MediaType{
-				Example: response.Body,
+				Schema: ref,
 			},
 		}
 	}
@@ -220,17 +248,30 @@ func (v *RequestValidator[reqData, respData]) param(
 
 		switch paramType {
 		case "path":
+			//path param is required by default
+			p.parameter.Required = true
 			if err := v.verifyPathParamIsInPath(name); err != nil {
 				panic(err)
 			}
 		case "query", "header", "cookie":
-			if p.validationErr != "" {
-				resp := v.validationErrHandler(p.validationStatus, p.validationErr)
+			if p.requiredErr != "" {
+				resp := v.validationErrHandler(p.requiredStatus, p.requiredErr)
 				if resp == nil {
-					panic(fmt.Sprintf("you have not handled validationStatus and validationErr in your validationErrHandler for path '%v'", v.path))
+					panic(fmt.Sprintf("you have not handled requiredStatus and requiredErr in your validationErrHandler for path '%v'", v.path))
 				}
-				v.possibleResponse(fmt.Sprintf("if '%v' param '%v' is missing, api will respond with the following", paramType, name), resp)
+				v.possibleResponse(
+					/* fmt.Sprintf("if '%v' param '%v' is missing, api will respond with the following", paramType, name) */
+					p.requiredErr, resp,
+				)
 			}
+		}
+
+		if p.invalidTypeErr != "" {
+			resp := v.validationErrHandler(p.invalidTypeStatus, p.invalidTypeErr)
+			if resp == nil {
+				panic(fmt.Sprintf("you have not handled invalidTypeStatus and invalidTypeErr in your validationErrHandler for path '%v'", v.path))
+			}
+			v.possibleResponse(p.invalidTypeErr, resp)
 		}
 		return
 	}
@@ -241,13 +282,13 @@ func (v *RequestValidator[reqData, respData]) param(
 	case "header":
 		d = v.r.Header.Get(name)
 		if d == "" && p.parameter.Required {
-			v.write(v.root.validationErrHandler(p.validationStatus, p.validationErr))
+			v.write(v.root.validationErrHandler(p.requiredStatus, p.requiredErr))
 			return
 		}
 	case "cookie":
 		c, _ := v.r.Cookie(name)
 		if c == nil && p.parameter.Required {
-			v.write(v.root.validationErrHandler(p.validationStatus, p.validationErr))
+			v.write(v.root.validationErrHandler(p.requiredStatus, p.requiredErr))
 			return
 		}
 		if c != nil {
@@ -256,13 +297,13 @@ func (v *RequestValidator[reqData, respData]) param(
 	case "query":
 		d = v.query.Get(name)
 		if d == "" && p.parameter.Required {
-			v.write(v.root.validationErrHandler(p.validationStatus, p.validationErr))
+			v.write(v.root.validationErrHandler(p.requiredStatus, p.requiredErr))
 			return
 		}
 	case "path":
 		d = v.r.PathValue(name)
 		if d == "" {
-			v.write(v.root.validationErrHandler(p.validationStatus, p.validationErr))
+			v.write(v.root.validationErrHandler(p.requiredStatus, p.requiredErr))
 			return
 		}
 	}
@@ -316,12 +357,17 @@ type Response[respBody any] struct {
 	Headers   []*Header
 	MediaType mediaType
 	Body      *respBody
+
+	// also useful when response are just string not any structured data like json,yml etc,
+	// this will be considered only if the Body is nil
+	RawBody []byte
 }
+
 type validator[ValidatedData any, respBody any] func(v *RequestValidator[ValidatedData, respBody], reqData *ValidatedData)
 type validationErrHandler[respBody any] func(validatedStatus int, validatedErr string) (resp *Response[respBody])
 type handler[ValidatedData any, respBody any] func(reqData *ValidatedData) (resp *Response[respBody])
 
-func SetupHandler[ValidatedData any, respBody any](
+func SetupHandler[ValidatedData any, respBody any | string](
 	mux *Ogo,
 	method string,
 	path string,
@@ -329,12 +375,15 @@ func SetupHandler[ValidatedData any, respBody any](
 	validationErrHandler validationErrHandler[respBody],
 	handler handler[ValidatedData, respBody],
 ) {
+	// these two check make sure generic types are non pointer
 	if reflect.TypeOf(new(ValidatedData)).Elem().Kind() == reflect.Pointer {
 		panic(fmt.Sprintf("SetupHandler[#1,#2] for path '%v', type #1 is pointer type, make it a non pointer type", path))
 	}
 	if reflect.TypeOf(new(respBody)).Elem().Kind() == reflect.Pointer {
 		panic(fmt.Sprintf("SetupHandler[#1,#2] for path '%v', type #2 is pointer type, make it a non pointer type", path))
 	}
+
+	// this makes sure response is of basic type(ex: a string) or a struct
 	err, isBasic := isValidRespBodyType(reflect.TypeOf(new(respBody)).Elem())
 	if err != nil {
 		panic(err)
@@ -347,8 +396,11 @@ func SetupHandler[ValidatedData any, respBody any](
 	op := pi.GetOperation(method)
 	if op == nil {
 		op = openapi3.NewOperation()
+		op.Responses = openapi3.NewResponses()
+		op.Responses.Delete("default")
 		pi.SetOperation(method, op)
 	}
+
 	root := &RequestValidator[ValidatedData, respBody]{
 		method:                method,
 		isRespBodyIsBasicType: isBasic,
@@ -358,6 +410,11 @@ func SetupHandler[ValidatedData any, respBody any](
 		path:                  path,
 		validationErrHandler:  validationErrHandler,
 	}
+	root.possibleResponse("default success response", &Response[respBody]{
+		Status:    http.StatusOK,
+		Body:      new(respBody),
+		MediaType: Json,
+	})
 	validator(root, new(ValidatedData))
 	mux.Hmux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		v := &RequestValidator[ValidatedData, respBody]{

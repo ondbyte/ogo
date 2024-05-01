@@ -8,16 +8,23 @@ type ParamSettings func(param *Param)
 type PramOpts func()
 
 type Param struct {
-	parameter        *openapi3.Parameter
-	validationStatus int
-	validationErr    string
+	parameter                         *openapi3.Parameter
+	requiredStatus, invalidTypeStatus int
+	requiredErr, invalidTypeErr       string
 }
 
+// (has no effect on path param),
 // makes this param as required, return the status code and error you need to respond when its missing
 func (p *Param) Required(statusCode int, err string) *Param {
-	p.validationStatus = statusCode
-	p.validationErr = err
+	p.requiredStatus = statusCode
+	p.requiredErr = err
 	p.parameter.Required = true
+	return p
+}
+
+func (p *Param) IfInvalidType(statusCode int, err string) *Param {
+	p.invalidTypeStatus = statusCode
+	p.invalidTypeErr = err
 	return p
 }
 

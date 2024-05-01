@@ -7,12 +7,15 @@ import (
 	"reflect"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3gen"
 )
 
 type RequestBody struct {
-	mediaType mediaType
-	descr     string
-	mapper    func(bs []byte, ptr any)
+	mediaType        mediaType
+	validationStatus int
+	validationErr    string
+	descr            string
+	mapper           func(bs []byte, ptr any)
 }
 
 func (body *RequestBody) MediaType(mt mediaType) *RequestBody {
@@ -25,8 +28,17 @@ func (body *RequestBody) Description(d string) *RequestBody {
 	return body
 }
 
+// makes this body required, returned response will be the passed status and err when body is empty
+func (body *RequestBody) Required(status int, err string) *RequestBody {
+	body.validationStatus = status
+	body.validationErr = err
+	return body
+}
+
 type BodySettings func(body *RequestBody)
 
+// map the body of the request to a ptr
+// also set the details of the body using BodySettings
 func (v *RequestValidator[reqData, respData]) Body(ptr any, s BodySettings) {
 	if v.ogo {
 		if v.method == "GET" || v.method == "HEAD" {
@@ -45,16 +57,26 @@ v.Body(ptr,....)
 		}
 		body := &RequestBody{}
 		s(body)
-		content := openapi3.Content{}
 		example := reflect.New(t.Elem()).Interface()
-		content[string(body.mediaType)] = &openapi3.MediaType{
-			Example: example,
+		ref, err := openapi3gen.NewSchemaRefForValue(example, openapi3.Schemas{})
+		if err != nil {
+			panic(err)
 		}
-		v.operation.RequestBody = &openapi3.RequestBodyRef{
-			Value: &openapi3.RequestBody{
-				Content: content,
-			},
+		bodyParam := &openapi3.Parameter{
+			Name:        "body",
+			In:          "body",
+			Description: body.descr,
+			Schema:      ref,
 		}
+		if body.validationErr != "" {
+			bodyParam.Required = true
+			v.possibleResponse(body.validationErr, &Response[respData]{
+				Status: body.validationStatus,
+			})
+		}
+		v.operation.Parameters = append(v.operation.Parameters, &openapi3.ParameterRef{
+			Value: bodyParam,
+		})
 		v.reqBody = body
 		switch body.mediaType {
 		case Json, "":

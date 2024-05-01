@@ -1,25 +1,41 @@
 package petstoreexample
 
 import (
-	"context"
 	_ "embed"
-	"net/http"
 
 	"github.com/ondbyte/ogo"
-	"github.com/ondbyte/ogo/petstore_example/db"
+	"github.com/ondbyte/ogo/petstore_example/handlers"
 	"github.com/ondbyte/ogo/petstore_example/models"
 	"github.com/ondbyte/ogo/petstore_example/service"
 )
 
-// go:embed schema.sql
-var dbSchema string
+func demoPetService() *service.PetService {
+	return service.NewPetService(
+		map[uint]*models.Pet{},
+		map[uint]*models.Category{
+			0: &models.Category{
+				Id:   0,
+				Name: "dog",
+			},
+			2: &models.Category{
+				Id:   1,
+				Name: "dog",
+			},
+		},
+		map[uint]*models.Tag{
+			0: &models.Tag{
+				Id:   0,
+				Name: "brown",
+			},
+			2: &models.Tag{
+				Id:   1,
+				Name: "ginger",
+			},
+		},
+	)
+}
 
 func Run() {
-	db, err := db.InitDb(context.TODO(), dbSchema)
-	if err != nil {
-		panic(err)
-	}
-	petsService := service.NewPetService(db)
 	o := ogo.New(
 		func(info *ogo.Info) {
 			info.Title("Swagger Petstore")
@@ -41,41 +57,9 @@ func Run() {
 			info.Version("0.0.1")
 		},
 	)
-	if err != nil {
-		panic(err)
-	}
-	ogo.SetupHandler[models.Pet, models.Pet](
-		o,
-		"POST",
-		"/pet",
-		func(v *ogo.RequestValidator[models.Pet, models.Pet], reqData *models.Pet) {
-			v.Body(reqData, func(body *ogo.RequestBody) {
-				body.Description("create a new pet in the store")
-				body.MediaType(ogo.Json)
-			})
-		},
-		func(validatedStatus int, validatedErr string) (resp *ogo.Response[models.Pet]) {
-			if validatedErr != "" {
-				return &ogo.Response[models.Pet]{
-					Status: validatedStatus,
-				}
-			}
-			return nil
-		},
-		func(reqData *models.Pet) (resp *ogo.Response[models.Pet]) {
-			createdPet, err := petsService.AddPet(context.TODO(), reqData)
-			if err != nil {
-				return &ogo.Response[models.Pet]{
-					Status: http.StatusInternalServerError,
-				}
-			}
-			return &ogo.Response[models.Pet]{
-				Status:    http.StatusOK,
-				MediaType: ogo.Json,
-				Body:      createdPet,
-			}
-		},
-	)
 
+	petsService := demoPetService()
+	handlers.CreatePet(o, petsService)
+	handlers.GetPet(o, petsService)
 	o.Run(":8080")
 }

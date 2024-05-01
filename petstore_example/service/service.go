@@ -2,79 +2,61 @@ package service
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
-	"github.com/ondbyte/ogo/petstore_example/db"
-	"github.com/ondbyte/ogo/petstore_example/db/pets"
 	"github.com/ondbyte/ogo/petstore_example/models"
 )
 
-type Service struct {
-	db *db.Db
+type PetService struct {
+	pets       map[uint]*models.Pet
+	categories map[uint]*models.Category
+	tags       map[uint]*models.Tag
 }
 
-func NewPetService(db *db.Db) *Service {
-	return &Service{
-		db: db,
+func NewPetService(
+	pets map[uint]*models.Pet,
+	category map[uint]*models.Category,
+	tags map[uint]*models.Tag,
+) *PetService {
+	return &PetService{
+		pets:       pets,
+		categories: category,
+		tags:       tags,
 	}
 }
 
-func (s *Service) AddPet(ctx context.Context, ap *models.Pet) (*models.Pet, error) {
-	tx, err := s.db.BeginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	petx := s.db.Pets.WithTx(tx)
-	defer tx.Rollback()
-	p, err := petx.AddPet(ctx, pets.AddPetParams{
-		Name: ap.Name,
-		PhotoUrl: sql.NullString{
-			String: ap.PhotoUrl,
-		},
-		Status: ap.Status,
-		Category: sql.NullInt32{
-			Int32: int32(ap.Category.ID),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	id, err := p.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range ap.Tags {
-		result, err := petx.AddPetTag(ctx, pets.AddPetTagParams{
-			PetID: int32(id),
-			TagID: v.ID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		_, err = result.LastInsertId()
-		if err != nil {
-			return nil, err
+func (s *PetService) AddPet(ctx context.Context, ap *models.Pet) (*models.Pet, error) {
+	for _, p := range s.pets {
+		if p.Id == ap.Id || p.Name == ap.Name {
+			return nil, fmt.Errorf("pet exists")
 		}
 	}
-	tx.Commit()
-	ap.Id = id
-	return ap, err
-}
-func (s *Service) AddCategory(ctx context.Context, ap *models.Category) (*models.Category, error) {
-	tx, err := s.db.BeginTx(ctx)
-	if err != nil {
-		return nil, err
+	var validCategory bool
+	for _, c := range s.categories {
+		if c.Id == ap.Category.Id && c.Name == ap.Category.Name {
+			validCategory = true
+		}
 	}
-	petx := s.db.Pets.WithTx(tx)
-	defer tx.Rollback()
-	result, err := petx.AddCategory(ctx, ap.Name)
-	if err != nil {
-		return nil, err
+	if !validCategory {
+		return nil, fmt.Errorf("invalid category while add pet")
 	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
+	if !validCategory {
+		return nil, fmt.Errorf("invalid category while add pet")
 	}
-	ap.ID = id
+	var invalidTags string
+	for _, t1 := range s.tags {
+		for _, t2 := range ap.Tags {
+			if t1.Id == t2.Id && t1.Name == t2.Name {
+				continue
+			}
+			invalidTags += fmt.Sprintf("\ninvalid tag %v while add pet", t2)
+			break
+		}
+	}
+	if invalidTags != "" {
+		return nil, fmt.Errorf(invalidTags)
+	}
+
+	s.pets[ap.Id] = ap
 	return ap, nil
 }
