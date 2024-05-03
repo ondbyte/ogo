@@ -81,7 +81,7 @@ func TestB(t *testing.T) {
 /*
  */
 func TestA(t *testing.T) {
-	o := ogo.New(nil)
+	o := ogo.NewServer(nil)
 	var wg sync.WaitGroup
 	wg.Add(maxReq)
 	allocs := 0
@@ -125,7 +125,7 @@ func TestA(t *testing.T) {
 		)
 	}
 	go func() {
-		o.Run(":8080")
+		o.Run(8080, func(info *ogo.ServerInfo) {})
 	}()
 	time.Sleep(time.Second)
 	go func() {

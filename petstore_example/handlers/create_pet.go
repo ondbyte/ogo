@@ -9,7 +9,7 @@ import (
 	"github.com/ondbyte/ogo/petstore_example/service"
 )
 
-func CreatePet(o *ogo.Ogo, petService *service.PetService) {
+func CreatePet(o *ogo.Server, petService *service.PetService) {
 	ogo.SetupHandler[models.Pet, models.Pet](
 		o,
 		"POST",

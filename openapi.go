@@ -2,7 +2,20 @@ package ogo
 
 import "github.com/getkin/kin-openapi/openapi3"
 
-type Info struct {
+type ServerInfo struct {
+	description string
+	url         string
+}
+
+func (si *ServerInfo) Description(d string) {
+	si.description = d
+}
+
+func (si *ServerInfo) Url(u string) {
+	si.url = u
+}
+
+type SwaggerInfo struct {
 	Extensions     map[string]interface{} `json:"-" yaml:"-"`
 	title          string                 `json:"title" yaml:"title"` // Required
 	description    string                 `json:"description,omitempty" yaml:"description,omitempty"`
@@ -12,14 +25,22 @@ type Info struct {
 	version        string                 `json:"version" yaml:"version"` // Required
 }
 
-func (i *Info) asOpenApi3Info() *openapi3.Info {
+func (i *SwaggerInfo) asOpenApi3Info() *openapi3.Info {
+	var contact *openapi3.Contact
+	var license *openapi3.License
+	if i.contact != nil {
+		contact = i.contact.toOpenApi3Contact()
+	}
+	if i.license != nil {
+		license = i.license.toOpenApi3License()
+	}
 	return &openapi3.Info{
 		Title:          i.title,
 		Description:    i.description,
 		TermsOfService: i.termsOfService,
 		Version:        i.version,
-		Contact:        i.contact.toOpenApi3Contact(),
-		License:        i.license.toOpenApi3License(),
+		Contact:        contact,
+		License:        license,
 	}
 }
 
@@ -34,27 +55,27 @@ type License struct {
 	Url  string `json:"url,omitempty" yaml:"url,omitempty"`
 }
 
-func (i *Info) Title(title string) {
+func (i *SwaggerInfo) Title(title string) {
 	i.title = title
 }
 
-func (i *Info) Description(description string) {
+func (i *SwaggerInfo) Description(description string) {
 	i.description = description
 }
 
-func (i *Info) TermsOfService(termsOfService string) {
+func (i *SwaggerInfo) TermsOfService(termsOfService string) {
 	i.termsOfService = termsOfService
 }
 
-func (i *Info) Contact(contact *Contact) {
+func (i *SwaggerInfo) Contact(contact *Contact) {
 	i.contact = contact
 }
 
-func (i *Info) License(license *License) {
+func (i *SwaggerInfo) License(license *License) {
 	i.license = license
 }
 
-func (i *Info) Version(version string) {
+func (i *SwaggerInfo) Version(version string) {
 	i.version = version
 }
 
@@ -73,4 +94,5 @@ func (k *License) toOpenApi3License() *openapi3.License {
 	}
 }
 
-type OgoSettings func(info *Info)
+type SwaggerInfoSettings func(info *SwaggerInfo)
+type ServerSettings func(info *ServerInfo)

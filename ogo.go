@@ -17,29 +17,39 @@ type StatusCode int
 
 type ErrorFormatter func(ReqErrs) (string, StatusCode)
 
-type Ogo struct {
-	info  *Info
-	Ogo   bool
-	Hmux  *http.ServeMux
-	paths *openapi3.Paths
+type Server struct {
+	info       *SwaggerInfo
+	ogo        bool
+	hmux       *http.ServeMux
+	paths      *openapi3.Paths
+	serverInfo *ServerInfo
 }
 
 // ServeHTTP implements http.Handler.
-func (m *Ogo) Run(addr string) error {
-	m.serveSwaggerUi(addr)
-	m.Ogo = false
+func (m *Server) Run(port uint, serverSettings ServerSettings) error {
+	i := &ServerInfo{}
+	serverSettings(i)
+	url := fmt.Sprintf("http://localhost:%v", port)
+	if i.url == "" {
+		i.url = url
+	}
+	m.serverInfo = i
+	m.serveSwaggerUi(url)
+	m.ogo = false
 	//fmt.Println("ogo running on: ", addr)
-	return http.ListenAndServe(addr, m.Hmux)
+	return http.ListenAndServe(fmt.Sprintf(":%v", port), m.hmux)
 }
 
-func New(s OgoSettings) *Ogo {
-	i := &Info{}
-	s(i)
-	return &Ogo{
+func NewServer(s SwaggerInfoSettings) *Server {
+	i := &SwaggerInfo{}
+	if s != nil {
+		s(i)
+	}
+	return &Server{
 		info:  i,
-		Ogo:   true,
+		ogo:   true,
 		paths: openapi3.NewPaths(),
-		Hmux:  http.NewServeMux(),
+		hmux:  http.NewServeMux(),
 	}
 }
 
@@ -50,10 +60,11 @@ var (
 )
 
 type RequestValidator[ValidatedData any, RespBody any] struct {
-	root                  *RequestValidator[ValidatedData, RespBody]
-	w                     http.ResponseWriter
-	r                     *http.Request
-	reqBody               *RequestBody //details about the incoming body
+	root    *RequestValidator[ValidatedData, RespBody]
+	w       http.ResponseWriter
+	r       *http.Request
+	reqBody *RequestBody //details about the incoming body
+	// err encountered while validation
 	method                string
 	isRespBodyIsBasicType bool // is the response body is a basic type
 	path                  string
@@ -97,30 +108,6 @@ func (v *RequestValidator[reqData, respData]) Depricated(d func() bool) {
 		v.operation.Deprecated = d()
 	}
 }
-
-/*
-// return the possible response this api could respond
-func (v *Validator[reqData, respData]) OnSuccess(d func() (status int, response *respData)) {
-	if v.ogo {
-		sc, rd := d()
-		firstField := reflect.TypeOf(rd).Field(0)
-		content := ""
-		if _, isJson := firstField.Tag.Lookup("json"); isJson {
-			content = "application/json"
-		} else if _, isYaml := firstField.Tag.Lookup("yaml"); isYaml {
-			content = "application/yaml"
-		} else if _, isXml := firstField.Tag.Lookup("xml"); isXml {
-			content = "application/xml"
-		}
-		v.operation.AddResponse(sc, &openapi3.Response{
-			Content: openapi3.Content{
-				content: &openapi3.MediaType{
-					Example: rd,
-				},
-			},
-		})
-	}
-} */
 
 func (v *RequestValidator[reqData, respData]) HeaderParam(name string, ptr any, s ParamSettings) {
 	v.param("header", name, ptr, s)
@@ -214,10 +201,14 @@ func (v *RequestValidator[reqData, respBody]) possibleResponse(
 		panic(err)
 	}
 	if response.MediaType != "" && response.Body != nil {
+		media := &openapi3.MediaType{
+			Schema: ref,
+		}
+		if response.Body != nil {
+			media.Example = response.Body
+		}
 		r.Content = openapi3.Content{
-			string(response.MediaType): &openapi3.MediaType{
-				Schema: ref,
-			},
+			string(response.MediaType): media,
 		}
 	}
 	v.operation.AddResponse(response.Status, r)
@@ -331,14 +322,14 @@ type RespContext[reqData any, respData any] struct {
 func (ctx *RespContext[reqData, respData]) Write(response respData) {
 
 }
-func (m *Ogo) serveSwaggerUi(addr string) {
+func (m *Server) serveSwaggerUi(url string) {
 	t := &openapi3.T{
 		Info:    m.info.asOpenApi3Info(),
 		OpenAPI: "3.0.2",
 	}
 	t.Servers = append(t.Servers, &openapi3.Server{
-		URL:         "http://localhost:8080",
-		Description: "xyz",
+		URL:         m.serverInfo.url,
+		Description: m.serverInfo.description,
 	})
 	t.Paths = m.paths
 	b, err := json.Marshal(t)
@@ -346,8 +337,8 @@ func (m *Ogo) serveSwaggerUi(addr string) {
 		panic(err)
 	}
 	ep := "/swagger_doc/*"
-	url := fmt.Sprintf("%v%v", addr, ep)
-	m.Hmux.Handle(ep, swagui.Handle(b, swagui.Json))
+	url = fmt.Sprintf("%v%v", url, ep)
+	m.hmux.Handle(ep, swagui.Handle(b, swagui.Json))
 	fmt.Println("swagger UI is at: ", url)
 	fmt.Println("swagger Spec: ", string(b))
 }
@@ -368,7 +359,7 @@ type validationErrHandler[respBody any] func(validatedStatus int, validatedErr s
 type handler[ValidatedData any, respBody any] func(reqData *ValidatedData) (resp *Response[respBody])
 
 func SetupHandler[ValidatedData any, respBody any | string](
-	mux *Ogo,
+	mux *Server,
 	method string,
 	path string,
 	validator validator[ValidatedData, respBody],
@@ -416,9 +407,9 @@ func SetupHandler[ValidatedData any, respBody any | string](
 		MediaType: Json,
 	})
 	validator(root, new(ValidatedData))
-	mux.Hmux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+	mux.hmux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		v := &RequestValidator[ValidatedData, respBody]{
-			ogo:   mux.Ogo,
+			ogo:   mux.ogo,
 			root:  root,
 			query: r.URL.Query(),
 			w:     w,

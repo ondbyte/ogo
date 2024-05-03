@@ -4,18 +4,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"reflect"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3gen"
 )
 
+type ValidationErr struct {
+	status int
+	err    string
+}
+
 type RequestBody struct {
-	mediaType        mediaType
-	validationStatus int
-	validationErr    string
-	descr            string
-	mapper           func(bs []byte, ptr any)
+	*ValidationErr
+	mediaType   mediaType
+	descr       string
+	mapper      func(bs []byte, ptr any)
+	requestBody *openapi3.RequestBody
 }
 
 func (body *RequestBody) MediaType(mt mediaType) *RequestBody {
@@ -30,8 +36,8 @@ func (body *RequestBody) Description(d string) *RequestBody {
 
 // makes this body required, returned response will be the passed status and err when body is empty
 func (body *RequestBody) Required(status int, err string) *RequestBody {
-	body.validationStatus = status
-	body.validationErr = err
+	body.status = status
+	body.err = err
 	return body
 }
 
@@ -44,39 +50,43 @@ func (v *RequestValidator[reqData, respData]) Body(ptr any, s BodySettings) {
 		if v.method == "GET" || v.method == "HEAD" {
 			panic(fmt.Sprintf("GET/HEAD method cannot have a request body but handler for path '%v' does", v.path))
 		}
-		t := reflect.TypeOf(ptr)
-		if t.Kind() != reflect.Pointer {
+		typ := reflect.TypeOf(ptr)
+		if typ.Kind() != reflect.Pointer {
 			panic("ptr should be a pointer")
 		}
-		if reflect.ValueOf(ptr).IsNil() {
+		val := reflect.ValueOf(ptr)
+		if val.IsNil() {
 			panic(`ptr cannot be empty, the pointer needs to be initialized to its zero value but its nil.
 example :
 ptr:=&YourBody{}
 v.Body(ptr,....)
 `)
 		}
-		body := &RequestBody{}
+		body := &RequestBody{
+			ValidationErr: &ValidationErr{},
+		}
 		s(body)
-		example := reflect.New(t.Elem()).Interface()
+		example := val.Interface()
 		ref, err := openapi3gen.NewSchemaRefForValue(example, openapi3.Schemas{})
 		if err != nil {
 			panic(err)
 		}
-		bodyParam := &openapi3.Parameter{
-			Name:        "body",
-			In:          "body",
+		body.requestBody = &openapi3.RequestBody{
 			Description: body.descr,
-			Schema:      ref,
+			Content: openapi3.Content{
+				string(body.mediaType): &openapi3.MediaType{
+					Schema: ref,
+				},
+			},
 		}
-		if body.validationErr != "" {
-			bodyParam.Required = true
-			v.possibleResponse(body.validationErr, &Response[respData]{
-				Status: body.validationStatus,
-			})
+
+		if body.ValidationErr != nil {
+			body.requestBody.Required = true
+			v.possibleResponse(body.err, v.validationErrHandler(body.status, body.err))
 		}
-		v.operation.Parameters = append(v.operation.Parameters, &openapi3.ParameterRef{
-			Value: bodyParam,
-		})
+		v.operation.RequestBody = &openapi3.RequestBodyRef{
+			Value: body.requestBody,
+		}
 		v.reqBody = body
 		switch body.mediaType {
 		case Json, "":
@@ -89,6 +99,10 @@ v.Body(ptr,....)
 		default:
 			panic(fmt.Sprintf("mediaType '%v' for requestBody isn't supported", body.mediaType))
 		}
+		return
+	}
+	if v.r.Body == http.NoBody && v.root.reqBody.requestBody.Required {
+		v.write(v.root.validationErrHandler(v.root.reqBody.status, v.root.reqBody.err))
 		return
 	}
 	bs, err := io.ReadAll(v.r.Body)

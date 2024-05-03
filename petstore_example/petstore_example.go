@@ -36,8 +36,8 @@ func demoPetService() *service.PetService {
 }
 
 func Run() {
-	o := ogo.New(
-		func(info *ogo.Info) {
+	o := ogo.NewServer(
+		func(info *ogo.SwaggerInfo) {
 			info.Title("Swagger Petstore")
 			info.Description("This is a sample server Petstore server. You can find out more about Swagger at http://swagger.io or on irc.freenode.net, #swagger. For this sample, you can use the api key special-key to test the authorization filters.")
 			info.TermsOfService("https://smartbear.com/terms-of-use/")
@@ -61,5 +61,5 @@ func Run() {
 	petsService := demoPetService()
 	handlers.CreatePet(o, petsService)
 	handlers.GetPet(o, petsService)
-	o.Run(":8080")
+	o.Run(8080, func(info *ogo.ServerInfo) {})
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/ondbyte/ogo/petstore_example/service"
 )
 
-func GetPet(o *ogo.Ogo, petService *service.PetService) {
+func GetPet(o *ogo.Server, petService *service.PetService) {
 	ogo.SetupHandler[uint, models.Pet](
 		o,
 		"GET",
