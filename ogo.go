@@ -409,7 +409,7 @@ func SetupHandler[ValidatedData any, respBody any | string](
 		MediaType: Json,
 	})
 	validator(root, new(ValidatedData))
-	mux.hmux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+	mux.hmux.HandleFunc(fmt.Sprintf("%v %v", method, path), func(w http.ResponseWriter, r *http.Request) {
 		v := &RequestValidator[ValidatedData, respBody]{
 			ogo:   mux.ogo,
 			root:  root,
