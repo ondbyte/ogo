@@ -338,9 +338,9 @@ func (m *Server) serveSwaggerUi(url string) {
 	if err != nil {
 		panic(err)
 	}
-	ep := "GET /swagger_doc/*"
+	ep := "/swagger_doc/*"
 	url = fmt.Sprintf("%v%v", url, ep)
-	m.hmux.Handle(ep, swagui.Handle(b, swagui.Json))
+	m.hmux.Handle(fmt.Sprintf("%v %v", "GET", ep), swagui.Handle(b, swagui.Json))
 	fmt.Println("swagger UI is at: ", url)
 	fmt.Println("swagger Spec: ", string(b))
 }
