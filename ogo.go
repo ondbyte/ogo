@@ -28,7 +28,9 @@ type Server struct {
 // ServeHTTP implements http.Handler.
 func (m *Server) Run(port uint, serverSettings ServerSettings) error {
 	i := &ServerInfo{}
-	serverSettings(i)
+	if serverSettings != nil {
+		serverSettings(i)
+	}
 	url := fmt.Sprintf("http://localhost:%v", port)
 	if i.url == "" {
 		i.url = url
